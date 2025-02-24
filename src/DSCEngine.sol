@@ -43,10 +43,10 @@ contract DSCEngine is ReentrancyGuard {
     error DSCEngine__MintFailed();
 
     uint256 private constant ADDITIONAL_FEED_PRECISION = 1e10;
-    uint256 private constant PRECISION = 1e18;
+    uint256 public constant PRECISION = 1e18;
     uint256 private constant LIQUIDATION_THRESHOLD = 50;
-    uint256 private constant LIQUIDATION_PRECISION = 100;
-    uint256 private constant LIQUIDATION_BONUS = 20;
+    uint256 public constant LIQUIDATION_PRECISION = 100;
+    uint256 public constant LIQUIDATION_BONUS = 20;
     uint256 private constant MIN_HEALTH_FACTOR = 1;
     DecentralizedStableCoin private immutable I_DSC;
 
@@ -199,22 +199,43 @@ contract DSCEngine is ReentrancyGuard {
         address user,
         uint256 debtToCover
     ) external moreThanZero(debtToCover) nonReentrant {
-        // Check health factor
         uint256 startingUserHealthFactor = _healthFactor(user);
         if (startingUserHealthFactor >= MIN_HEALTH_FACTOR) {
             revert DSCEngine__HealthFactorOk();
         }
+        
         uint256 tokenAmountFromDebtCovered = getTokenAmountFromUsd(collateralToken, debtToCover);
         uint256 bonusCollateral = (tokenAmountFromDebtCovered * LIQUIDATION_BONUS) / LIQUIDATION_PRECISION;
         uint256 totalCollateralToRedeem = tokenAmountFromDebtCovered + bonusCollateral;
-        _redeemCollateral(user, msg.sender, collateralToken, totalCollateralToRedeem);
-        _burnDsc(debtToCover, user, msg.sender);
+        
+        // Update both user's and liquidator's collateral balances
+        s_collateralDeposited[user][collateralToken] -= totalCollateralToRedeem;
+        s_collateralDeposited[msg.sender][collateralToken] += totalCollateralToRedeem;
+        
+        // Transfer the collateral
+        bool success = IERC20(collateralToken).transfer(msg.sender, totalCollateralToRedeem);
+        if (!success) {
+            revert DSCEngine__TransferFailed();
+        }
+        
+        // Update DSC balances for both parties
+        s_DSCMinted[user] -= debtToCover;
+        s_DSCMinted[msg.sender] -= debtToCover;
+        
+        // Burn the DSC
+        bool success2 = I_DSC.transferFrom(msg.sender, address(this), debtToCover);
+        if (!success2) {
+            revert DSCEngine__TransferFailed();
+        }
+        I_DSC.burn(debtToCover);
 
         uint256 endingUserHealthFactor = _healthFactor(user);
         if (endingUserHealthFactor <= startingUserHealthFactor) {
             revert DSCEngine__HealthFactorNotImproved();
         }
         _revertIfHealthFactorIsBroken(msg.sender);
+        
+        emit CollateralRedeemed(user, msg.sender, collateralToken, totalCollateralToRedeem);
     }
 
     function _burnDsc(uint256 amountDscToBurn, address onBehalfOf, address dscFrom) private {

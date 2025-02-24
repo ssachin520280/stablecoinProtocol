@@ -161,34 +161,50 @@ contract DSCEngineTest is Test {
         vm.stopPrank();
     }
 
-    // TODO: Add liquidation tests
-    // function testLiquidation() public depositedCollateral {
-    //     // Setup: USER mints maximum DSC
-    //     uint256 amountToMint = 8000 ether; // Assuming this brings health factor close to minimum
-    //     vm.startPrank(USER);
-    //     dsce.mintDsc(amountToMint);
-    //     vm.stopPrank();
+    // TODO: There can be more bugs. Test more
+    function testLiquidation() public depositedCollateral {
+        // Setup: USER mints maximum DSC
+        uint256 amountToMint = 8000 ether; // Assuming this brings health factor close to minimum
+        vm.startPrank(USER);
+        dsce.mintDsc(amountToMint);
+        vm.stopPrank();
 
-    //     // Setup: Create a price drop to make USER's position liquidatable
-    //     int256 newPrice = 1500e8; // Drop ETH price to $1500
-    //     MockV3Aggregator(ethUsdPriceFeed).updateAnswer(newPrice);
+        // Setup: Create a price drop to make USER's position liquidatable
+        int256 newPrice = 1500e8; // Drop ETH price to $1500
+        MockV3Aggregator(ethUsdPriceFeed).updateAnswer(newPrice);
 
-    //     // Setup: LIQUIDATOR gets DSC to liquidate USER
-    //     address LIQUIDATOR = makeAddr("liquidator");
-    //     ERC20Mock(weth).mint(LIQUIDATOR, AMOUNT_COLLATERAL);
-    //     vm.startPrank(LIQUIDATOR);
-    //     ERC20Mock(weth).approve(address(dsce), AMOUNT_COLLATERAL);
-    //     dsce.depositCollateralAndMintDsc(weth, AMOUNT_COLLATERAL, amountToMint);
-    //     dsc.approve(address(dsce), amountToMint);
+        // Setup: LIQUIDATOR gets DSC to liquidate USER
+        address LIQUIDATOR = makeAddr("liquidator");
+        ERC20Mock(weth).mint(LIQUIDATOR, 2 * AMOUNT_COLLATERAL);
+        vm.startPrank(LIQUIDATOR);
+        ERC20Mock(weth).approve(address(dsce), 2 * AMOUNT_COLLATERAL);
+        dsce.depositCollateralAndMintDsc(weth, 2 * AMOUNT_COLLATERAL, amountToMint);
+        (uint256 liquidatorDscMintedBefore, uint256 collateralValueInUsdBefore) = dsce.getAccountInformation(LIQUIDATOR);
+        assertEq(liquidatorDscMintedBefore, amountToMint);
+        assertEq(collateralValueInUsdBefore, 2 * AMOUNT_COLLATERAL * 1500); // 1500e8 is new price
+        dsc.approve(address(dsce), amountToMint);
 
-    //     // Perform liquidation
-    //     dsce.liquidate(weth, USER, amountToMint);
-    //     vm.stopPrank();
+        // Perform liquidation
+        dsce.liquidate(weth, USER, amountToMint);
+        vm.stopPrank();
 
-    //     // Verify USER's position is liquidated
-    //     (uint256 userDscMinted,) = dsce.getAccountInformation(USER);
-    //     assertEq(userDscMinted, 0);
-    // }
+        // Verify USER's position is liquidated
+        (uint256 userDscMinted,) = dsce.getAccountInformation(USER);
+        (uint256 liquidatorDscMintedAfter, ) = dsce.getAccountInformation(LIQUIDATOR);
+        assertEq(userDscMinted, 0);
+        assertEq(liquidatorDscMintedAfter, 0); // Should be 0 since DSC was burned
+        
+        // Calculate expected collateral received (proportional + bonus)
+        uint256 expectedCollateral = (amountToMint / 1500); // 1500e8 is new price
+        expectedCollateral = expectedCollateral +
+            (expectedCollateral * dsce.LIQUIDATION_BONUS()) / dsce.LIQUIDATION_PRECISION();
+        uint256 liquidatorCollateralAfter = ERC20Mock(weth).balanceOf(LIQUIDATOR);
+        assertEq(
+            liquidatorCollateralAfter,
+            expectedCollateral,
+            "Liquidator should receive proportional collateral plus bonus"
+        );
+    }
 
     function testRevertLiquidationIfHealthFactorOk() public depositedCollateral {
         // Try to liquidate a healthy position
