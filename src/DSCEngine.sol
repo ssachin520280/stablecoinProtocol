@@ -38,6 +38,7 @@ contract DSCEngine is ReentrancyGuard {
     error DSCEngine__NotAllowedToken();
     error DSCEngine__TransferFailed();
     error DSCEngine__HealthFactorIsBroken();
+    error DSCEngine__MintFailed();
 
     uint256 private constant ADDITIONAL_FEED_PRECISION = 1e10;
     uint256 private constant PRECISION = 1e18;
@@ -78,7 +79,26 @@ contract DSCEngine is ReentrancyGuard {
         I_DSC = DecentralizedStableCoin(_dscAddress);
     }
 
-    function depositCollateralAndMintDSC() external {}
+    /**
+     * @notice Deposits collateral and mints DSC in a single transaction
+     * @param _tokenCollateralAddress The ERC20 token address to be used as collateral
+     * @param _amountCollateral The amount of collateral to deposit (in wei)
+     * @param _amountDscToMint The amount of DSC to mint (in wei)
+     * @dev This is a convenience function that combines depositCollateral() and mintDsc()
+     * @custom:requirements
+     * - Token must be approved as collateral in constructor
+     * - Collateral amount must be > 0
+     * - User must have approved this contract to spend their tokens
+     * - Health factor must remain >= MIN_HEALTH_FACTOR after minting
+     */
+    function depositCollateralAndMintDSC(
+        address _tokenCollateralAddress,
+        uint256 _amountCollateral,
+        uint256 _amountDscToMint
+    ) external {
+        depositCollateral(_tokenCollateralAddress, _amountCollateral);
+        mintDsc(_amountDscToMint);
+    }
 
     /**
      * @notice Deposits collateral into the protocol to back DSC minting
@@ -91,7 +111,7 @@ contract DSCEngine is ReentrancyGuard {
      * - User must have approved this contract to spend their tokens
      */
     function depositCollateral(address tokenCollateralAddress, uint256 amountCollateral)
-        external
+        public
         moreThanZero(amountCollateral)
         isAllowedToken(tokenCollateralAddress)
         nonReentrant
@@ -118,12 +138,16 @@ contract DSCEngine is ReentrancyGuard {
      * - Amount must be > 0
      */
     function mintDsc(uint256 amountDscToMint) 
-        external 
+        public 
         moreThanZero(amountDscToMint) 
         nonReentrant 
     {
         s_DSCMinted[msg.sender] += amountDscToMint;
         _revertIfHealthFactorIsBroken(msg.sender);
+        bool minted = I_DSC.mint(msg.sender, amountDscToMint);
+        if(!minted) {
+            revert DSCEngine__MintFailed();
+        }
     }
 
     function burnDSC() external {}
