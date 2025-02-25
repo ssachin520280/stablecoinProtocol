@@ -5,6 +5,7 @@ import {DecentralizedStableCoin} from "./DecentralizedStableCoin.sol";
 import {ReentrancyGuard} from "../lib/openzeppelin-contracts/contracts/utils/ReentrancyGuard.sol";
 import {IERC20} from "../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import {AggregatorV3Interface} from "../lib/chainlink-brownie-contracts/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
+import {console} from "../lib/forge-std/src/console.sol";
 
 /**
  * @title DSCEngine (Decentralized Stablecoin Engine)
@@ -320,6 +321,6 @@ contract DSCEngine is ReentrancyGuard {
     }
 
     function getCollateralBalanceOfUser(address token, address user) external view returns (uint256) {
-        return getUsdValue(token, s_collateralDeposited[user][token]); 
+        return s_collateralDeposited[user][token]; 
     }
 }
